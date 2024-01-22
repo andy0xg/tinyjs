@@ -1,0 +1,348 @@
+// 形如 func (*gins.Context) 的函数是入口函数
+register_hook(AFTER_FUNCTION_DECL,
+    () => entry(__value__),
+    {
+        code: '*xyz.Context',
+        handler: () => {
+            params = __node__.query('type_/params/list')
+            return params.length == 1 ? 
+                ast_code(params[0].query('type_')) == '*xyz.Context' : false;
+        }
+    }
+)
+
+// 调用 CommonUtils.check() 时清洗实参 (类型判断)
+register_hook(BEFORE_FIELD,
+    ()=> callable(()=>cleanse(__args__[0])),
+    { code: '^CommonUtils.check(' },
+)
+
+// 调用 CommonUtils.check() 时清洗实参 (类型判断)
+register_hook(AFTER_FIELD,
+    ()=> __value__.image().match(/x\.seclib\.CommonUtils\.check/) ? 
+        callable(()=>cleanse(__args__[0])) : null,
+    { code: '^CommonUtils.check(' },
+)
+
+// 检查用户输入包含 ..
+register_hook(BEFORE_BRANCH,
+    () => {
+        ret = ast_code(__node__.query('condition')).match(/(\w+).contains/)
+        if (ret.length == 2) { cleanse(eval_expr(ret[1])) }
+    },
+    { code: '.contains("..")' }
+)
+
+// 分支语句判断 host.endsWith 时, 清洗 url 和 urls
+register_hook(BEFORE_BRANCH, 
+    () => cleanse(eval_expr('url')) || cleanse(eval_expr('urls')),
+    { 
+        code: 'host.endsWith(',
+        handler: () => ast_code(__node__.query('condition')).match(/host\.endsWith/),
+    },
+)
+
+register_hook(BEFORE_FIELD,
+    () => callable(()=>sink(__args__[0], RISK_SQLI)),
+    { code: '^db.Exec$' },
+)
+register_hook(AFTER_NAME,
+    () => eval_expr('TestDao1'),
+    {code: '^Dao$'}
+)
+
+register_hook(BEFORE_FIELD,
+    () => callable(()=>sink(__args__[0], RISK_SQLI)),
+    { code: '^db.exec$' },
+)
+register_hook(AFTER_ASSIGN,
+    () => eval('client = HelloQuery3{}'),
+    { code: '^client, _ := GetQueryEndPoint(info, region)$' },
+)
+
+register_hook(BEFORE_FIELD,
+    () => unknown(),
+    { code: '^exec.Command$' }
+)
+
+// 清洗 new Yaml(new SafeConstructor()) 的 load 函数
+register_hook(BEFORE_ASSIGN, 
+    () => {
+        n = __node__.query('name:simple_name/identifier');
+        return n ? eval_expr(`${n} = _1`, {_1: unknown()}): null;
+    },
+    { code: '= new Yaml(new SafeConstructor())' },
+)
+
+// db.query 是危险函数
+register_hook(BEFORE_FIELD, 
+    () => callable(()=>sink(__args__[0], RISK_SQLI)), 
+    { code: '^db.query(' },
+)
+// XxxSecurityContext.??Check().check?? 是清洗函数
+register_hook(BEFORE_FIELD, 
+    () => callable(()=>__args__.forEach(arg => cleanse(arg))),
+    { 
+        code: '^XxxSecurityContext.',
+        handler: () => {
+            code = ast_code(__node__)
+            return code.match(/XxxSecurityContext\.\w+Checker\(.*\)\.check\w+\(/)
+        }
+    },
+)
+
+// db.query 是危险函数
+register_hook(BEFORE_FIELD, 
+    () => callable(()=>sink(__args__[0], RISK_SQLI)), 
+    { code: '^db.query(' },
+)
+
+// SqlInjectCheckUtil.checkSqlInjection 是清洗函数
+register_hook(BEFORE_FIELD, 
+    () => callable(()=>__args__.forEach(arg => cleanse(arg))),
+    { code: '^SqlInjectCheckUtil.checkSqlInjection(' },
+)
+
+register_hook(AFTER_CALL, 
+    () => {
+        if (__value__.is_taint()) {
+            cleanse(__value__, {kind: RISK_CRLF})
+        }
+    }, 
+    { code: '.replace("\n", "")' },
+)
+
+register_hook(BEFORE_NAME,
+    () => callable(()=>sink(__args__[0], RISK_URL)), 
+    { code: '^redirect$' },
+)
+register_hook(BEFORE_FIELD, 
+    () => callable(()=>{
+        if (__args__.length == 2 && __args__[0].is_taint()) {
+            cleanse(__args__[0], {kind: RISK_URL})
+        }
+    }),
+    { code: '^strings.HasPrefix$' },
+)
+
+// isInternalIp
+register_hook(BEFORE_CALL,
+    () => cleanse(eval_expr('urls')),
+    { code: '^isInternalIp(' },
+)
+
+register_hook(BEFORE_CALL, 
+    () => {
+        m = ast_code(__node__).match(/FILTER_PATTERN.matcher\((\w+)\)/)
+        if (m.length == 2) {
+            cleanse(eval_expr(m[1]))
+        }
+    },
+    { code: '^FILTER_PATTERN.matcher(' },
+)
+
+register_hook(BEFORE_NAME,
+    () => callable(()=>sink(__args__[0], RISK_READ)),
+    { code: '^read$' }
+)
+register_hook(AFTER_FIELD,
+    ()=> callable(() => {
+        if (__args__.length == 2 && __args__[1].image() == '..') {
+            cleanse(__args__[0]);
+        }
+    }),
+    { code: '^strings.Contains$' },
+)
+
+// 识别 if (req.getFilePath().contains(".."))
+register_hook(BEFORE_BRANCH,
+    () => cleanse(eval_expr(`req._filepath`)),
+    { code: 'req.getFilePath().contains("..")' }
+)
+// mock req.getFilePath()
+register_hook(BEFORE_CALL,
+    () => eval_expr('req._filepath'),
+    {code: '^req.getFilePath()$'}
+)
+
+// 识别 if (req.getFilePath().contains(".."))
+register_hook(BEFORE_BRANCH,
+    () => {
+        ret = ast_code(__node__).match(/(\w+).getFilePath\(\).contains/)
+        if (ret && ret.length == 2) {
+            v = ret[1];
+            cleanse(eval_expr(`${v}._filepath`), {kind: RISK_PATH});
+        }
+    },
+    { code: '.getFilePath().contains("..")' }
+)
+// mock req.getFilePath()
+register_hook(BEFORE_CALL,
+    () => {
+        ret = ast_code(__node__).match(/(\w+).getFilePath\(\)/)
+        if (ret && ret.length == 2) {
+            v = ret[1];
+            return eval_expr(`${v}._filepath`);
+        }
+    },
+    {code: '.getFilePath()$'}
+)
+
+register_hook(AFTER_BINARY,
+    () => cleanse(__value__, {kind: RISK_SSRF}),
+    { code: '^REMOTEURL + url$' },
+)
+
+// 分支语句判断 host.endsWith 时, 清洗 url 和 urls
+register_hook(BEFORE_BRANCH, 
+    () => cleanse(eval_expr('url')) || cleanse(eval_expr('urls')),
+    { 
+        code: 'host.endsWith(',
+        handler: () => ast_code(__node__.query('condition')).match(/host\.endsWith/),
+    },
+)
+
+// 泛化变量名
+register_hook(BEFORE_BRANCH,
+    () => {
+        ret = ast_code(__node__).match(/(\w+).contains/)
+        if (ret.length == 2) {
+            cleanse(eval_expr(ret[1]))
+        }
+    },
+    { code: '.contains("..")' }
+)
+
+
+// action 装饰的函数是入口函数
+register_hook(AFTER_FUNCTION_DECL,
+    () => entry(__value__),
+    {
+        handler: () => {
+            this_n = __node__;
+            parent_n = this_n.query('..:decorated');
+            if (!parent_n) {
+                return false;
+            }
+            deco0_n = parent_n.query('decorators/0:call/target');
+            if (!deco0_n) {
+                return false;
+            }
+            deco0_c = ast_code(deco0_n);
+            return deco0_c == 'action';
+        }
+    }
+)
+
+// cursor.exeucte 是危险函数
+register_hook(BEFORE_FIELD, 
+    () => callable(()=>__args__.forEach(arg => sink(arg, RISK_SQLI))),
+    { code: '^cursor.exeucte$' },
+)
+
+// 取属性 self.data 是污点
+register_hook(BEFORE_FIELD,
+    () => source(),
+    { code: '^self.data$' },
+)
+
+// Where 是危险函数
+register_hook(AFTER_FIELD,
+    () => {
+        if (__value__.is_unknown()) {
+            return callable(()=>__args__.forEach(arg => sink(arg, RISK_SQLI)))
+        }
+    },
+    {
+        code: 'Where$',
+        handler: () => {
+            this_n = __node__
+            parent_n = this_n.query('..:call_expr')
+            if (!parent_n) { return false }
+            field = this_n.query('sel/name')
+            return field == 'Where'
+        }
+    },
+)
+
+
+register_hook(BEFORE_FIELD,
+    () => callable(()=>sink(__args__[0], RISK_SQLI)),
+    { code: '^metric.QueryMetric$' },
+    )
+register_hook(BEFORE_FIELD,
+    () => callable(()=>__args__[0]),
+    { code: '^inxql.ParseQuery$' },
+    )
+
+
+  register_hook(AFTER_FIELD, () => {
+    if (__value__.is_unknown()) {
+      return callable(arg => sink(arg, RISK_SQLI))
+    }
+  }, {code: '^query.'})
+
+
+  // mock file.getOriginalFilename()
+register_hook(BEFORE_CALL,
+    () => eval_expr('file._filepath'),
+    {code: '^file.getOriginalFilename()$'}
+)
+// FileSecuritySdk.checkFileName 是清洗函数
+register_hook(BEFORE_FIELD, 
+    () => callable(()=>__args__.forEach(arg => cleanse(arg))),
+    { code: '^FileSecuritySdk.checkFileName(' },
+)
+
+register_hook(BEFORE_BRANCH,
+    () => {
+        condition = __node__.query('condition')
+        code = ast_code(condition)
+        if (code.includes('file.getOriginalFilename().substring') && code.includes('file.getOriginalFilename().lastIndexOf(".")')) {
+            cleanse(eval_expr('file'))
+        }
+    },
+    {
+        'code': 'file.getOriginalFilename().lastIndexOf(".")',
+    }
+)
+
+
+// 处理 request = RequestEntity...
+register_hook(AFTER_ASSIGN,
+    () => {
+        tmp = ast_code(__node__).match('\.(?:post|get)\((.+?)\)');
+        if (tmp) {
+            eval_expr("request = " + tmp[1]);
+        }
+    },
+    { code: 'request = RequestEntity' },
+)
+// sink 是危险函数
+register_hook(BEFORE_NAME,
+    () => callable(()=>__args__.forEach(arg => sink(arg, RISK_RCE))), 
+    { code: '^sink$' },
+)
+
+
+register_hook(BEFORE_BRANCH,
+    () => {
+        test = ast_code(__node__.query('test'))
+        match = test.match(/in_array\(strtolower\(\$ext\)/)
+        if (match) {
+            cleanse(eval_expr('$file'))
+        }
+    },
+    { code: 'in_array(strtolower($ext)' },
+)
+
+
+register_hook(AFTER_LOOP,
+    () => {
+        code = ast_code(__node__.query('body'))
+        if (code.includes('if req.ReqType == field {')) {
+            eval('req.ReqType = _1', {_1: unknown()})
+        }
+    },
+    { code: '^for _, field := range XxxWhiteList {' },
+)
